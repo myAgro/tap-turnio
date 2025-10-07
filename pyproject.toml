@@ -1,0 +1,63 @@
+# =============================================================================
+# pyproject.toml
+# =============================================================================
+[tool.poetry]
+name = "tap-turnio"
+version = "0.1.0"
+description = "Singer tap for Turn.io WhatsApp API"
+authors = ["MyAgro Data Engineering Team <data@myagro.org>"]
+packages = [{ include = "tap_turnio" }]
+
+[tool.poetry.dependencies]
+# Uses PEP 604 unions (|), so require 3.10+
+python = "^3.10"
+singer-sdk = { version = "0.48.1", extras = ["testing"] }
+requests = "^2.31.0"
+python-dotenv = "^1.0.0"
+python-dateutil = "^2.8.2"
+setuptools = "<81"
+pendulum = ">=3.1"
+
+# ------- OPTIONAL deps so pip extras work -------
+pytest = { version = ">=7.5,<9.0", optional = true }
+ruff = { version = "^0.6.9", optional = true }
+pre-commit = { version = "^3.8.0", optional = true }
+
+[tool.poetry.group.dev.dependencies]
+# Keep Poetry's dev group for people using Poetry
+pytest = ">=7.5,<9.0"
+ruff = "^0.6.9"
+pre-commit = "^3.8.0"
+
+# Expose a 'dev' extra that pip can install
+[tool.poetry.extras]
+dev = ["pytest", "ruff", "pre-commit"]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+tap-turnio = "tap_turnio.tap:cli"
+
+# =============================================================================
+# Ruff config
+# =============================================================================
+[tool.ruff]
+# Match your interpreter; if you use 3.10 locally, set py310
+target-version = "py311"
+line-length = 150
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]  # pycodestyle, pyflakes, isort, bugbear, pyupgrade
+ignore = []
+
+[tool.ruff.format]
+quote-style = "preserve"
+
+# =============================================================================
+# pytest config
+# =============================================================================-
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
