@@ -134,14 +134,14 @@ plugins:
 
   loaders:
     - name: target-postgres
-	  namespace: target_postgres
-	  pip_url: target-postgres
-	  config:
-		host: localhost
-		port: 5432
-		user: your_db_user
-		password: your_db_password
-		dbname: your_db_name
+      namespace: target_postgres
+      pip_url: target-postgres
+      config:
+        host: localhost
+        port: 5432
+        user: your_db_user
+        password: your_db_password
+        dbname: your_db_name
 
 ```
 
