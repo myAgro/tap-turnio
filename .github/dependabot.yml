@@ -1,0 +1,20 @@
+# Please see the documentation for all configuration options:
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # Python packages (Singer SDK, requests, etc.)
+  - package-ecosystem: "pip"
+    directory: "/" # location of pyproject.toml
+    schedule:
+      interval: "weekly"
+    # Optional: keep dependencies modern without surprises
+    open-pull-requests-limit: 5
+    allow:
+      - dependency-type: "direct" # only top-level dependencies declared
+
+  # 1GitHub Actions (keeps workflows like codeql.yml updated)
+  - package-ecosystem: "github-actions"
+    directory: "/" # root folder where workflows live (.github/workflows)
+    schedule:
+      interval: "weekly"
