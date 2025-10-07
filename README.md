@@ -2,7 +2,7 @@
 
 **`tap-turnio`** is a [Singer](https://www.singer.io/) tap built with the [Singer SDK](https://sdk.meltano.com/) for extracting WhatsApp message and status data from the **Turn.io** API.
 
-It provides structured, incremental replication of message and status records for analytics pipelines and data warehouses.
+It provides structured, incremental replication of message and status records for analytics pipelines and data warehouses!
 
 ---
 
