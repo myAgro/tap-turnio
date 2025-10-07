@@ -133,7 +133,7 @@ plugins:
         base_url: https://whatsapp.turn.io
 
   loaders:
-  	- name: target-postgres
+    - name: target-postgres
 	  namespace: target_postgres
 	  pip_url: target-postgres
 	  config:
