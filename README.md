@@ -4,7 +4,7 @@
 
 It provides structured, incremental replication of message and status records for analytics pipelines and data warehouses.
 
----
+----
 
 ## 🧩 Capabilities
 
