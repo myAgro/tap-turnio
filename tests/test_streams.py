@@ -1,5 +1,7 @@
 from datetime import timedelta
+
 from dateutil.parser import isoparse
+
 from tap_turnio.streams import MessagesStream, StatusesStream
 from tap_turnio.tap import TapTurnio
 
