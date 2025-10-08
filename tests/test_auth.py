@@ -1,5 +1,7 @@
 import base64
+
 from tap_turnio.auth import TurnAuthenticator
+
 
 class _DummyLogger:
     def warning(self, *a, **k): pass

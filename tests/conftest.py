@@ -1,5 +1,7 @@
 import base64
+
 import pytest
+
 
 @pytest.fixture
 def base_config():
