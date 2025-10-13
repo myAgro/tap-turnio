@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import sys
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from json import JSONDecodeError
@@ -19,6 +21,7 @@ import requests
 from dateutil.parser import isoparse
 from requests import PreparedRequest, Request, Response
 from singer_sdk import typing as th
+from singer_sdk.exceptions import TapStreamConnectionFailure
 from singer_sdk.streams.rest import RESTStream
 
 from tap_turnio.auth import TurnAuthenticator
@@ -80,6 +83,23 @@ class TurnStream(RESTStream):
     # Centralizing here makes it easy to adjust verbosity/format globally.
     # =============================================================================
     def _log(self, level: int, msg: str, *args, **kwargs) -> None:
+        """Log with correct color and message type."""
+        # Detect if stdout is a terminal (so colors only show in dev)
+        use_color = sys.stdout.isatty() or sys.stderr.isatty() or bool(os.getenv("FORCE_COLOR", ""))
+        level_name = logging.getLevelName(level)
+        color_map = {
+            "DEBUG": "\033[90m",    # gray
+            "INFO": "\033[37m",     # white
+            "WARNING": "\033[33m",  # yellow
+            "ERROR": "\033[31m",    # red
+            "CRITICAL": "\033[91m"  # bright red
+        }
+        reset = "\033[0m"
+        # Colorize message if interactive
+        if use_color and level_name in color_map:
+            msg = f"{color_map[level_name]}[{level_name}] {msg}{reset}"
+        else:
+            msg = f"[{level_name}] {msg}"
         self.logger.log(level, msg, *args, **kwargs)
 
     def _info(self, msg: str, *args, **kwargs) -> None:
@@ -392,6 +412,18 @@ class TurnStream(RESTStream):
         prepared_request = self.prepare_request(context, None)
         self._log_prepared_request(prepared_request, "create_cursor")
         response = self._request(prepared_request, context)
+        """ Log and parse cursor creation response """
+        self._log_http_response(response, note="Cursor creation response")
+        if response.status_code == 403:
+            self._error("Access forbidden (403) when creating cursor for %s. Check credentials and permissions.", self.kind)
+            raise TapStreamConnectionFailure("403 Forbidden")
+        if not getattr(response, "text", "").strip():
+            self._warning(
+                "Empty response body when creating cursor for %s (HTTP %s)",
+                self.kind,
+                getattr(response, "status_code", "unknown"),
+            )
+            return None, None
         try:
             meta = response.json()
         except JSONDecodeError:

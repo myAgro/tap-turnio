@@ -27,7 +27,10 @@
 
 from __future__ import annotations
 
+import sys
+
 from singer_sdk import Tap
+from singer_sdk.exceptions import TapStreamConnectionFailure
 from singer_sdk.plugin_base import PluginBase  # noqa: F401  # (kept for IDE refs / parity)
 
 from tap_turnio.streams import MessagesStream, StatusesStream
@@ -117,4 +120,8 @@ class TapTurnio(Tap):
 # =============================================================================
 def cli() -> None:
     """Run the tap via Click-based CLI provided by Singer SDK."""
-    TapTurnio.cli()
+    try:
+        TapTurnio.cli()
+    except TapStreamConnectionFailure as exc:
+        raise SystemExit(f"Tap failed: {exc}") from exc
+        sys.exit(1)
