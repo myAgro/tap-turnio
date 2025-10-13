@@ -23,6 +23,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Logging levels:
   - Restored correct log severity output ([ERROR], [WARNING], [INFO]) across SDK integrations.
   - Introduced optional ANSI color formatting for human-friendly local debugging (FORCE_COLOR=1).
+- Deprecated packages
+  - singer-sdk bumped from 0.48.1 to 0.50.2
+  - pre-commit bumped from 3.8.0 to 4.3.0
+  - ruff bumped from 0.6.9 to 0.13.3
+
 
 ### Deprecated
 - 
