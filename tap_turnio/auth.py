@@ -42,9 +42,9 @@ class TurnAuthenticator(APIAuthenticatorBase):
         - No refresh / token exchange is needed.
     """
 
-    def __init__(self, stream, username: str, password: str, base_url: str) -> None:
+    def __init__(self, username: str, password: str, base_url: str) -> None:
         """Initialize authenticator with static credentials."""
-        super().__init__(stream=stream)
+        super().__init__()
         self._username = username
         self._password = password
         self._base_url = base_url

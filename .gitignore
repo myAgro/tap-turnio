@@ -214,3 +214,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Meltano dev files
+dev-files/
+data-ingestion/
