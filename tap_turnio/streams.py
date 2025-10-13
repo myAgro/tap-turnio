@@ -411,7 +411,7 @@ class TurnStream(RESTStream):
         prepared_request = self.prepare_request(context, None)
         self._log_prepared_request(prepared_request, "create_cursor")
         response = self._request(prepared_request, context)
-        """ Log and parse cursor creation response """
+        """Log and parse cursor creation response."""
         self._log_http_response(response, note="Cursor creation response")
         if response.status_code == 403:
             self._error("Access forbidden (403) when creating cursor for %s. Check credentials and permissions.", self.kind)

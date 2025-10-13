@@ -27,8 +27,6 @@
 
 from __future__ import annotations
 
-import sys
-
 from singer_sdk import Tap
 from singer_sdk.exceptions import TapStreamConnectionFailure
 from singer_sdk.plugin_base import PluginBase  # noqa: F401  # (kept for IDE refs / parity)
@@ -124,4 +122,3 @@ def cli() -> None:
         TapTurnio.cli()
     except TapStreamConnectionFailure as exc:
         raise SystemExit(f"Tap failed: {exc}") from exc
-        sys.exit(1)
