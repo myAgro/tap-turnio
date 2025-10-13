@@ -15,7 +15,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - 
 
 ### Fixed
-- 
+- 403 Forbidden handling:
+  - Added graceful error raising (TapStreamConnectionFailure) to stop execution cleanly when authentication fails.
+  - Prevented unnecessary pagination or further stream processing after failed auth.
+- Deprecation warning:
+  - Removed deprecated stream argument from TurnAuthenticator initializer (auth.py), aligning with latest Singer SDK standards.
+- Logging levels:
+  - Restored correct log severity output ([ERROR], [WARNING], [INFO]) across SDK integrations.
+  - Introduced optional ANSI color formatting for human-friendly local debugging (FORCE_COLOR=1).
 
 ### Deprecated
 - 
