@@ -20,13 +20,13 @@ pendulum = ">=3.1"
 
 # ------- OPTIONAL deps so pip extras work -------
 pytest = { version = ">=7.5,<9.0", optional = true }
-ruff = { version = "^0.13.3", optional = true }
+ruff = { version = "^0.14.1", optional = true }
 pre-commit = { version = "^4.3.0", optional = true }
 
 [tool.poetry.group.dev.dependencies]
 # Keep Poetry's dev group for people using Poetry
 pytest = ">=7.5,<9.0"
-ruff = "^0.13.3"
+ruff = "^0.14.1"
 pre-commit = "^4.3.0"
 
 # Expose a 'dev' extra that pip can install
