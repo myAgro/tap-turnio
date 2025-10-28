@@ -62,8 +62,9 @@ class TurnStream(RESTStream):
     def authenticator(self) -> TurnAuthenticator:
         """Return authenticator initialized with config credentials."""
         return TurnAuthenticator(
-            self.config["username"],
-            self.config["password"],
+            self.config.get("username"),
+            self.config.get("password"),
+            self.config.get("token"),
             self.url_base,
         )
 

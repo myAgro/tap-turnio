@@ -12,6 +12,7 @@
 #   prefix. For Meltano or direct CLI, typical variables are:
 #     TAP_TURNIO_USERNAME
 #     TAP_TURNIO_PASSWORD
+#     TAP_TURNIO_TOKEN
 #     TAP_TURNIO_BASE_URL
 #     TAP_TURNIO_START_DATE
 #     TAP_TURNIO_PAGE_SIZE
@@ -61,6 +62,7 @@ class TapTurnio(Tap):
             # --- Auth & endpoint ---------------------------------------------------
             "username": {"type": "string"},
             "password": {"type": "string"},
+            "token": {"type": "string"},
             "base_url": {
                 "type": "string",
                 "default": "https://whatsapp.turn.io",
@@ -95,7 +97,7 @@ class TapTurnio(Tap):
             "messages_cursor_json": {"type": "object", "default": {}},
             "statuses_cursor_json": {"type": "object", "default": {}},
         },
-        "required": ["username", "password"],
+        "required": ["username"],
         "additionalProperties": False,
     }
 
