@@ -251,6 +251,7 @@ or supports **Token Auth** via:
 token: <your-token-value>
 ```
 
+**Note:** Do not include the `Bearer` prefix; it is added automatically by the tap.
 implemented via the `TurnAuthenticator` class in [`auth.py`](./tap_turnio/auth.py).
 
 ---
