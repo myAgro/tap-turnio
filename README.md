@@ -248,7 +248,7 @@ Authorization: Basic base64(username:password)
 or supports **Token Auth** via:
 
 ```
-token: Bearer <token>
+token: <your-token-value>
 ```
 
 implemented via the `TurnAuthenticator` class in [`auth.py`](./tap_turnio/auth.py).
