@@ -177,7 +177,7 @@ plugins:
       pip_url: -e .
       config:
         username: ${TAP_TURNIO_USERNAME}
-        password: ${TAP_TURNIO_TOKEN}
+        token: ${TAP_TURNIO_TOKEN}
         base_url: https://whatsapp.turn.io
 
   loaders:
