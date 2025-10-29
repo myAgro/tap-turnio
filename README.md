@@ -12,6 +12,7 @@ It provides structured, incremental replication of message and status records fo
 * ✅ **Two streams**: `messages` and `statuses`
 * ✅ **Configurable pagination and overlap (`lookback_sec`)**
 * ✅ **HTTP Basic authentication**
+* ✅ **HTTP Token authentication** (via API token)
 * ✅ **Rate limiting** with Turn.io headers (`X-Ratelimit-*`, `Retry-After`)
 * ✅ **JSON flattening** and safe post-processing
 * ✅ **Singer-compatible output** (SCHEMA + RECORD + STATE messages)
@@ -40,8 +41,9 @@ The tap reads credentials and parameters from environment variables prefixed wit
 
 | Setting                | Type              | Required | Default                    | Description                                 |
 | ---------------------- | ----------------- | -------- | -------------------------- | ------------------------------------------- |
-| `username`             | string            | ✅        | —                          | Turn.io account username                    |
-| `password`             | string            | ✅        | —                          | Turn.io account password                    |
+| `username`             | string            | ✅        | —                          | Turn.io account username (required)         |
+| `password`             | string            | ✅        | —                          | Turn.io account password (optional)         |
+| `token`                | string            | ✅        | —                          | Turn.io account token (if not basic auth)   |
 | `base_url`             | string            | ❌        | `https://whatsapp.turn.io` | Base URL for the Turn.io API                |
 | `start_date`           | string (ISO 8601) | ❌        | —                          | Earliest replication start date             |
 | `page_size`            | integer           | ❌        | 100                        | API page size                               |
@@ -50,7 +52,7 @@ The tap reads credentials and parameters from environment variables prefixed wit
 | `messages_cursor_json` | object            | ❌        | `{}`                       | Optional POST cursor params for messages    |
 | `statuses_cursor_json` | object            | ❌        | `{}`                       | Optional POST cursor params for statuses    |
 
-### Example configuration file (`config.json`)
+### Example basic auth configuration file (`config.json`)
 
 ```json
 {
@@ -68,6 +70,26 @@ or via environment variables:
 ```bash
 export TAP_TURNIO_USERNAME="your-turnio-username"
 export TAP_TURNIO_PASSWORD="your-turnio-password"
+```
+
+### Example token auth configuration file (`config.json`)
+
+```json
+{
+  "username": "your-turnio-username",
+  "token": "my-token-abc-123",
+  "base_url": "https://whatsapp.turn.io",
+  "start_date": "2024-01-01T00:00:00Z",
+  "page_size": 100,
+  "lookback_sec": 120
+}
+```
+
+or via environment variables:
+
+```bash
+export TAP_TURNIO_USERNAME="your-turnio-username"
+export TAP_TURNIO_TOKEN="my-token-abc-123"
 ```
 
 ---
@@ -145,6 +167,32 @@ plugins:
 
 ```
 
+or
+
+```yaml
+plugins:
+  extractors:
+    - name: tap-turnio
+      namespace: tap_turnio
+      pip_url: -e .
+      config:
+        username: ${TAP_TURNIO_USERNAME}
+        password: ${TAP_TURNIO_TOKEN}
+        base_url: https://whatsapp.turn.io
+
+  loaders:
+    - name: target-postgres
+      namespace: target_postgres
+      pip_url: target-postgres
+      config:
+        host: localhost
+        port: 5432
+        user: your_db_user
+        password: your_db_password
+        dbname: your_db_name
+
+```
+
 Then:
 
 ```bash
@@ -195,6 +243,12 @@ The tap uses static **HTTP Basic Auth**, encoded as:
 
 ```
 Authorization: Basic base64(username:password)
+```
+
+or supports **Token Auth** via:
+
+```
+token: Bearer <token>
 ```
 
 implemented via the `TurnAuthenticator` class in [`auth.py`](./tap_turnio/auth.py).
