@@ -9,7 +9,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 > Use this section during development before tagging the next release.
 
 ### Added
-- Token based authentication support in addition to the existing basic auth
+- token based authentication support in addition to the existing basic auth
 
 ### Changed
 - singer-sdk bumped from 0.50.2 to 0.52.2
