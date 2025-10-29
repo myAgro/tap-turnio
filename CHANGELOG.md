@@ -9,11 +9,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 > Use this section during development before tagging the next release.
 
 ### Added
-- token based authentication support in addition to the existing basic auth
+- 
 
 ### Changed
-- singer-sdk bumped from 0.50.2 to 0.52.2
-- ruff bumped from 0.13.3 to 0.14.2
+- 
 
 ### Fixed
 - 
@@ -23,6 +22,18 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Removed
 - 
+
+## [0.1.2] - 2025-10-29
+### ✨ Minor Release — *Token Auth Support*
+This minor release introduces support for token-based authentication, allowing users to authenticate using API tokens in addition to the existing basic authentication method.
+
+#### ✨ Added
+- Authentication:
+  - Added `token` configuration option for token-based auth.
+  - Updated `TurnAuthenticator` to handle both basic auth and token auth.
+  - Documentation updated with examples for token auth usage.
+
+---
 
 ## [0.1.1] - 2025-10-13
 ### 🛠️ Patch Release — *Bug Fixes & Improvements*
