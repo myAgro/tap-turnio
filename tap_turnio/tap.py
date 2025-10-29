@@ -97,7 +97,10 @@ class TapTurnio(Tap):
             "messages_cursor_json": {"type": "object", "default": {}},
             "statuses_cursor_json": {"type": "object", "default": {}},
         },
-        "required": ["username"],
+        "anyOf": [
+            {"required": ["username","token"]},
+            {"required": ["username", "password"]},
+        ],
         "additionalProperties": False,
     }
 
