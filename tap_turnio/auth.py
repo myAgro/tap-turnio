@@ -3,13 +3,13 @@
 # Custom authenticator for Turn.io API using HTTP Basic Auth.
 #
 # Responsibilities:
-#   - Hold username/password/base_url for this tap
+#   - Hold token/username/password/base_url for this tap
 #   - Expose an `auth_headers` property so that the Singer SDK + requests.Session
 #     can automatically apply the correct Authorization header.
 #   - Compatible with the Singer SDK's `APIAuthenticatorBase`.
 #
 # Notes:
-#   - Use simple HTTP Basic Auth (`Authorization: Basic <base64>`)
+#   - Use simple HTTP Basic Auth (`Authorization: Basic <base64>`) if token is not provided
 #   - No token refresh flow required, since credentials are static
 #   - A setter is included to satisfy the SDK contract, but is effectively a no-op
 # -----------------------------------------------------------------------------
