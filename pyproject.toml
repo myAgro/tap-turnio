@@ -15,7 +15,7 @@ singer-sdk = { version = "0.52.5", extras = ["testing"] }
 requests = "^2.31.0"
 python-dotenv = "^1.0.0"
 python-dateutil = "^2.8.2"
-setuptools = "<81"
+setuptools = "<83"
 pendulum = ">=3.1"
 
 # ------- OPTIONAL deps so pip extras work -------
