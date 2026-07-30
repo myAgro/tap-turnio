@@ -221,3 +221,6 @@ data-ingestion/
 
 # Temporary files
 notes
+plugins
+*.sample
+meltano.yml
