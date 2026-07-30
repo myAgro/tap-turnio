@@ -218,3 +218,6 @@ __marimo__/
 # Meltano dev files
 dev-files/
 data-ingestion/
+
+# Temporary files
+notes
