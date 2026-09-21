@@ -23,6 +23,20 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Removed
 - 
 
+## [0.2.0] - 2026-09-21
+### ✨ Minor Release — *Message labels*
+Adds a `message_labels` stream reading `/v1/labels` and
+`/v1/labels/<uuid>/messages`, so labels applied after a message is logged reach
+the warehouse. The message export cannot carry them: Turn.io paginates messages
+by `inserted_at` and never re-emits a logged message.
+
+#### ✨ Added
+- `message_labels` stream, FULL_TABLE, one row per (message, label) pair,
+  including links Turn.io has marked `deleted`.
+- `labels_max_pages_per_label` setting to cap pages fetched per label.
+
+---
+
 ## [0.1.2] - 2025-10-29
 ### ✨ Minor Release — *Token Auth Support*
 This minor release introduces support for token-based authentication, allowing users to authenticate using API tokens in addition to the existing basic authentication method.
