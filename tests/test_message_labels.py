@@ -170,7 +170,8 @@ def test_drops_duplicate_links_within_a_label(base_config, dummy_response_cls, d
     assert [r["message_id"] for r in rows] == ["m1", "m2"]
 
 
-def test_stops_when_next_points_back_at_a_visited_page(base_config, dummy_response_cls, dummy_context):
+def test_a_page_loop_fails_the_run(base_config, dummy_response_cls, dummy_context):
+    """Paging in a circle leaves the rest of the label unreachable."""
     calls = []
     stream = _stream(base_config)
     _wire(
@@ -183,9 +184,8 @@ def test_stops_when_next_points_back_at_a_visited_page(base_config, dummy_respon
         calls=calls,
     )
 
-    rows = list(stream.request_records(dummy_context))
-
-    assert [r["message_id"] for r in rows] == ["m1"]
+    with pytest.raises(TapStreamConnectionFailure):
+        list(stream.request_records(dummy_context))
     assert calls.count(MESSAGES_URL) == 1
 
 
@@ -338,3 +338,16 @@ def test_never_emits_activate_version_messages(base_config):
         assert stream.emit_activate_version_messages is False
     finally:
         del type(stream).config
+
+
+def test_epoch_like_dates_are_rejected_rather_than_read_as_seconds():
+    """"20260921" is a date without separators, not an epoch."""
+    assert coerce_timestamp("20260921") is None
+    assert coerce_timestamp(True) is None
+    assert coerce_timestamp(False) is None
+    assert coerce_timestamp("1740000000") is not None
+
+
+def test_the_sweep_reuses_one_session(base_config):
+    stream = _stream(base_config)
+    assert stream.http_client is stream.http_client

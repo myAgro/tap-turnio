@@ -154,6 +154,11 @@ short read is indistinguishable from "this label lost its messages", and the
 loader would carry that through as an unlabelling, so a partial sweep must
 never be published.
 
+Requests go through the header-aware limiter and reuse a single session for
+the whole sweep. This is the highest-volume stream in the tap, and the base
+class both rebuilds its session per request and bypasses the SDK hook that
+applies the limiter, so this stream wires both up itself.
+
 Cost is one request per 50 links per label. Set `labels_max_pages_per_label` to
 cap a runaway label; the tap logs the link count per label on every run. Note
 that capping truncates a label, and the loader treats the links you stop

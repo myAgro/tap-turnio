@@ -37,10 +37,15 @@ def coerce_timestamp(value: Any) -> str | None:
     Turn sends either an ISO-8601 string or a Unix epoch, and the epoch arrives
     as a bare integer on some endpoints and a digit string on others.
     """
-    if value is None or value == "":
+    if value is None or value == "" or isinstance(value, bool):
         return None
     try:
+        # Only digit strings of epoch length are epochs. "20260921" is a date
+        # someone wrote without separators, and reading it as seconds would
+        # silently place the message in 1970.
         if isinstance(value, str) and value.isdigit():
+            if not 9 <= len(value) <= 13:
+                return None
             value = int(value)
         if isinstance(value, int | float):
             return datetime.fromtimestamp(value, tz=UTC).isoformat()
@@ -1037,6 +1042,33 @@ class MessageLabelsStream(TurnStream):
     ).to_dict()
 
     # =============================================================================
+    # HTTP transport
+    #
+    # The base class builds a new session on every access and overrides the
+    # SDK hook that would otherwise apply the rate limiter, so requests made
+    # here would go out unthrottled and without retry. This stream issues far
+    # more requests than any other, so it keeps one session and sends through
+    # the limiter explicitly.
+    # =============================================================================
+    _session: requests.Session | None = None
+    _limited_send = None
+
+    @property
+    def http_client(self) -> requests.Session:
+        """Return one session reused for the whole sweep."""
+        if self._session is None:
+            self._session = super().http_client
+        return self._session
+
+    def _request(self, prepared_request, context):
+        """Send through the header-aware limiter, with its 429 backoff."""
+        if self._limited_send is None:
+            self._limited_send = self.request_decorator(
+                lambda request, **kwargs: self.http_client.send(request, **kwargs)
+            )
+        return self._limited_send(prepared_request)
+
+    # =============================================================================
     # HTTP helper
     # =============================================================================
     def _get_json(self, url: str, context: dict, label: str) -> dict | None:
@@ -1106,11 +1138,12 @@ class MessageLabelsStream(TurnStream):
 
         while url:
             if url in visited:
-                # Turn pointing back at a page it already served would page
-                # forever; stopping here is safe because every link on that
-                # page has already been emitted.
-                self._warning("Repeated page URL for label %s in %s; stopping to avoid a loop", label_uuid, self.kind)
-                break
+                # Paging in a circle means the rest of this label is
+                # unreachable, so the sweep is short. Fail rather than report
+                # a truncated label set as if it were complete.
+                raise TapStreamConnectionFailure(
+                    f"Label {label_uuid} paged back to a page already served; cannot complete the sweep"
+                )
             visited.add(url)
 
             payload = self._get_json(url, context, f"label {label_uuid} page{page_num + 1}")

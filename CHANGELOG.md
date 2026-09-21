@@ -40,6 +40,12 @@ by `inserted_at` and never re-emits a logged message.
   partial sweep, which the loader would otherwise apply as an unlabelling.
 - Activate-version messages stay off for `message_labels`, so the table is
   upsert-only and a failed sweep cannot blank every label.
+- Label requests go through the header-aware rate limiter and reuse one
+  session, so a 429 is retried instead of killing the run.
+- A label that pages back to a page already served fails the run rather than
+  reporting a truncated label set as complete.
+- `coerce_timestamp` rejects booleans and digit strings that are not epoch
+  length, so a date written as `20260921` is no longer read as 1970.
 
 ---
 
