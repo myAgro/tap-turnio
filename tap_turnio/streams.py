@@ -992,6 +992,12 @@ class StatusesStream(TurnStream):
 # Focused overrides:
 #   - request_records: walks /v1/labels, then /v1/labels/<uuid>/messages
 #   - no cursor endpoint, so the base window/bookmark machinery is unused
+#
+# Partial sweeps are treated as failures. On a full-table stream a short read
+# is indistinguishable from "this label lost its messages", and the loader
+# would carry that straight through to the warehouse as an unlabelling. Every
+# transport or shape error therefore raises and fails the run, leaving the
+# previous good copy in place.
 # =============================================================================
 class MessageLabelsStream(TurnStream):
     """Stream of message-to-label links read from the Turn label endpoints."""
@@ -1057,12 +1063,11 @@ class MessageLabelsStream(TurnStream):
         """Yield every label currently linked to the number."""
         payload = self._get_json(f"{self.url_base}/v1/labels", context, "labels list")
         if payload is None:
-            return
+            raise TapStreamConnectionFailure("Could not list labels")
 
         labels = payload.get("labels")
         if not isinstance(labels, list):
-            self._error("Expected 'labels' to be a list for %s, got %s", self.kind, type(labels).__name__)
-            return
+            raise TapStreamConnectionFailure(f"Expected 'labels' to be a list, got {type(labels).__name__}")
 
         for label in labels:
             if not isinstance(label, dict):
@@ -1088,18 +1093,22 @@ class MessageLabelsStream(TurnStream):
 
         while url:
             if url in visited:
+                # Turn pointing back at a page it already served would page
+                # forever; stopping here is safe because every link on that
+                # page has already been emitted.
                 self._warning("Repeated page URL for label %s in %s; stopping to avoid a loop", label_uuid, self.kind)
                 break
             visited.add(url)
 
             payload = self._get_json(url, context, f"label {label_uuid} page{page_num + 1}")
             if payload is None:
-                break
+                raise TapStreamConnectionFailure(f"Could not read page {page_num + 1} of label {label_uuid}")
 
             items = payload.get("message_labels")
             if not isinstance(items, list):
-                self._error("Expected 'message_labels' to be a list for %s, got %s", self.kind, type(items).__name__)
-                break
+                raise TapStreamConnectionFailure(
+                    f"Expected 'message_labels' to be a list for label {label_uuid}, got {type(items).__name__}"
+                )
 
             emitted = 0
             for item in items:

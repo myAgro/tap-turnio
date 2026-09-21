@@ -143,8 +143,16 @@ so a label applied after the message arrived can only be read from the label
 endpoints. Those endpoints offer no date filter, and bookmarking on the message
 timestamp would drop exactly the late labels this stream exists to capture.
 
+Any transport or shape error raises and fails the run. On a full table stream a
+short read is indistinguishable from "this label lost its messages", and the
+loader would carry that through as an unlabelling, so a partial sweep must
+never be published.
+
 Cost is one request per 50 links per label. Set `labels_max_pages_per_label` to
-cap a runaway label; the tap logs the link count per label on every run.
+cap a runaway label; the tap logs the link count per label on every run. Note
+that capping truncates a label, and the loader treats the links you stop
+fetching as removed, so use it to survive an incident rather than as a steady
+state.
 
 ---
 

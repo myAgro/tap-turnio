@@ -35,6 +35,10 @@ by `inserted_at` and never re-emits a logged message.
   including links Turn.io has marked `deleted`.
 - `labels_max_pages_per_label` setting to cap pages fetched per label.
 
+#### 🛡️ Reliability
+- Any failed or malformed label request fails the run rather than publishing a
+  partial sweep, which the loader would otherwise apply as an unlabelling.
+
 ---
 
 ## [0.1.2] - 2025-10-29

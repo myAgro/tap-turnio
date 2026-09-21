@@ -2,6 +2,7 @@ from datetime import timedelta
 
 import pytest
 from dateutil.parser import isoparse
+from singer_sdk.exceptions import TapStreamConnectionFailure
 
 from tap_turnio.streams import MessageLabelsStream, coerce_timestamp
 from tap_turnio.tap import TapTurnio
@@ -240,7 +241,8 @@ def test_stores_null_for_an_unparseable_confidence(base_config, dummy_response_c
     assert list(stream.request_records(dummy_context))[0]["confidence"] is None
 
 
-def test_one_failing_label_does_not_lose_the_others(base_config, dummy_response_cls, dummy_context):
+def test_a_failing_label_page_fails_the_run(base_config, dummy_response_cls, dummy_context):
+    """A short read must not look like an unlabelling to the loader."""
     stream = _stream(base_config)
     _wire(
         stream,
@@ -257,9 +259,28 @@ def test_one_failing_label_does_not_lose_the_others(base_config, dummy_response_
         dummy_response_cls,
     )
 
-    rows = list(stream.request_records(dummy_context))
+    with pytest.raises(TapStreamConnectionFailure):
+        list(stream.request_records(dummy_context))
 
-    assert [r["message_id"] for r in rows] == ["m2"]
+
+def test_a_failing_label_listing_fails_the_run(base_config, dummy_response_cls, dummy_context):
+    stream = _stream(base_config)
+    _wire(stream, {LABELS_URL: (500, {})}, dummy_response_cls)
+
+    with pytest.raises(TapStreamConnectionFailure):
+        list(stream.request_records(dummy_context))
+
+
+def test_a_malformed_message_page_fails_the_run(base_config, dummy_response_cls, dummy_context):
+    stream = _stream(base_config)
+    _wire(
+        stream,
+        {LABELS_URL: ONE_LABEL, MESSAGES_URL: {"has_more": False, "message_labels": "not-a-list"}},
+        dummy_response_cls,
+    )
+
+    with pytest.raises(TapStreamConnectionFailure):
+        list(stream.request_records(dummy_context))
 
 
 def test_skips_labels_without_a_uuid(base_config, dummy_response_cls, dummy_context):
@@ -276,11 +297,12 @@ def test_skips_labels_without_a_uuid(base_config, dummy_response_cls, dummy_cont
     assert [r["message_id"] for r in list(stream.request_records(dummy_context))] == ["m1"]
 
 
-def test_yields_nothing_when_the_label_listing_is_malformed(base_config, dummy_response_cls, dummy_context):
+def test_a_malformed_label_listing_fails_the_run(base_config, dummy_response_cls, dummy_context):
     stream = _stream(base_config)
     _wire(stream, {LABELS_URL: {"labels": "not-a-list"}}, dummy_response_cls)
 
-    assert list(stream.request_records(dummy_context)) == []
+    with pytest.raises(TapStreamConnectionFailure):
+        list(stream.request_records(dummy_context))
 
 
 def test_label_uuid_is_url_encoded(base_config, dummy_response_cls, dummy_context):
