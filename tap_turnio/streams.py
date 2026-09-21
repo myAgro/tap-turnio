@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from json import JSONDecodeError
 from typing import Any
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse, urlunparse
 
 import pendulum
 import requests
@@ -998,11 +998,12 @@ class StatusesStream(TurnStream):
 #   - request_records: walks /v1/labels, then /v1/labels/<uuid>/messages
 #   - no cursor endpoint, so the base window/bookmark machinery is unused
 #
-# Partial sweeps are treated as failures. On a full-table stream a short read
-# is indistinguishable from "this label lost its messages", and the loader
-# would carry that straight through to the warehouse as an unlabelling. Every
-# transport or shape error therefore raises and fails the run, leaving the
-# previous good copy in place.
+# Partial sweeps are treated as failures. A short read is indistinguishable
+# from "this label lost its messages", so every transport or shape error
+# raises rather than letting the run report a truncated label set as complete.
+# Records already streamed before the failure are still committed by the
+# loader; because this stream only ever upserts, that leaves some rows
+# refreshed and the rest untouched, never removed.
 # =============================================================================
 class MessageLabelsStream(TurnStream):
     """Stream of message-to-label links read from the Turn label endpoints."""
@@ -1097,9 +1098,22 @@ class MessageLabelsStream(TurnStream):
             return None
         return payload
 
-    def _absolute(self, url: str) -> str:
-        """Resolve a possibly relative 'next' pointer against the base URL."""
-        return url if url.startswith("http") else f"{self.url_base}/{url.lstrip('/')}"
+    def _absolute(self, pointer: str) -> str:
+        """Resolve a 'next' pointer against the configured base URL.
+
+        Only the path and query are taken, never the host. The session carries
+        the Turn bearer token on every request, so following a host named in a
+        response body would hand that token to whoever named it.
+        """
+        parsed = urlparse(pointer)
+        if parsed.scheme or parsed.netloc:
+            base = urlparse(self.url_base)
+            if (parsed.scheme, parsed.netloc) != (base.scheme, base.netloc):
+                raise TapStreamConnectionFailure(
+                    f"Refusing to follow a next pointer off {base.netloc}: {parsed.scheme}://{parsed.netloc}"
+                )
+        path = parsed.path if parsed.path.startswith("/") else f"/{parsed.path}"
+        return urlunparse(("", "", f"{self.url_base}{path}", "", parsed.query, ""))
 
     # =============================================================================
     # Label listing
@@ -1133,7 +1147,6 @@ class MessageLabelsStream(TurnStream):
 
         url: str | None = f"{self.url_base}/v1/labels/{quote_plus(label_uuid)}/messages"
         visited: set[str] = set()
-        seen_message_ids: set[str] = set()
         page_num = 0
 
         while url:
@@ -1161,13 +1174,11 @@ class MessageLabelsStream(TurnStream):
                 record = self._build_record(item, label)
                 if record is None:
                     continue
-                # Turn may repeat a link across pages while labels are being
-                # applied. Duplicates inside one batch break the target's
-                # upsert, so drop them here.
-                if record["message_id"] in seen_message_ids:
-                    self._debug("Duplicate link %s/%s in %s; skipping", record["message_id"], label_uuid, self.kind)
-                    continue
-                seen_message_ids.add(record["message_id"])
+                # Repeats are passed through rather than filtered. Turn can
+                # serve the same link twice while labels are being applied,
+                # and the loader keys on (message_id, label_uuid) with the
+                # last write winning, so the newest state is the one that
+                # lands. Dropping the repeat would instead pin the oldest.
                 emitted += 1
                 yield record
 
@@ -1179,8 +1190,14 @@ class MessageLabelsStream(TurnStream):
                 break
 
             next_pointer = payload.get("next")
-            if not payload.get("has_more") or not isinstance(next_pointer, str) or not next_pointer.strip():
+            if not payload.get("has_more"):
                 break
+            if not isinstance(next_pointer, str) or not next_pointer.strip():
+                # Turn says there is more but gave us no way to reach it, so
+                # the rest of this label is lost. Fail rather than call it done.
+                raise TapStreamConnectionFailure(
+                    f"Label {label_uuid} reports more pages but gave no next pointer"
+                )
             url = self._absolute(next_pointer.strip())
 
     # =============================================================================
@@ -1226,11 +1243,28 @@ class MessageLabelsStream(TurnStream):
             "label_value": label.get("value"),
             "label_color": label.get("color"),
             "confidence": confidence,
-            "deleted": bool(item.get("deleted", False)),
+            "deleted": self._is_deleted(item),
             # Best effort. A link is still valid when the timestamp is not.
             "message_timestamp": coerce_timestamp(message.get("timestamp")),
             "metadata": metadata,
         }
+
+    def _is_deleted(self, item: dict) -> bool:
+        """Read the deleted flag without guessing.
+
+        `bool("false")` is True, so coercing the raw value would unlabel a
+        message on a response Turn never meant that way. Anything unrecognised
+        counts as not deleted, which keeps the label rather than dropping it.
+        """
+        raw = item.get("deleted", False)
+        if isinstance(raw, bool):
+            return raw
+        if raw is None:
+            return False
+        if isinstance(raw, str) and raw.strip().lower() in {"true", "false"}:
+            return raw.strip().lower() == "true"
+        self._error("Unrecognised deleted value %r in %s; treating the link as live", raw, self.kind)
+        return False
 
     # =============================================================================
     # Public record request entrypoint

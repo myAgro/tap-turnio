@@ -46,6 +46,17 @@ by `inserted_at` and never re-emits a logged message.
   reporting a truncated label set as complete.
 - `coerce_timestamp` rejects booleans and digit strings that are not epoch
   length, so a date written as `20260921` is no longer read as 1970.
+- A `next` pointer is resolved against the configured base URL and refused if
+  it names another host, so a response body cannot redirect the bearer token.
+- `has_more` with no usable `next` fails the run instead of reporting a
+  truncated label set as complete.
+- The `deleted` flag is read rather than coerced; `bool("false")` is True and
+  would have unlabelled the message.
+- Repeated links are passed through rather than filtered, so the later state
+  wins at the loader instead of the first one seen. This also removes the
+  per-label set of message ids, which grew with every historical link.
+- A 429 now waits on the bucket Turn named rather than on `general`, which
+  returned at once and burned the retry budget in milliseconds.
 
 ---
 

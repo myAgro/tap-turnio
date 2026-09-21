@@ -152,7 +152,50 @@ def test_emits_deleted_links_so_removals_reach_the_warehouse(base_config, dummy_
 # =============================================================================
 # Reliability
 # =============================================================================
-def test_drops_duplicate_links_within_a_label(base_config, dummy_response_cls, dummy_context):
+def test_a_repeated_link_keeps_the_later_state(base_config, dummy_response_cls, dummy_context):
+    """The loader is last-write-wins on the key, so repeats must pass through.
+
+    Filtering them would pin the first state seen, which is the stale one when
+    a label is removed between pages.
+    """
+    page_two = "https://whatsapp.turn.io/v1/labels/lbl-1/messages?p=1"
+    later = _label_page(["m1", "m2"])
+    later["message_labels"][0]["deleted"] = True
+
+    stream = _stream(base_config)
+    _wire(
+        stream,
+        {
+            LABELS_URL: ONE_LABEL,
+            MESSAGES_URL: _label_page(["m1"], has_more=True, next_pointer=page_two),
+            page_two: later,
+        },
+        dummy_response_cls,
+    )
+
+    rows = list(stream.request_records(dummy_context))
+
+    assert [r["message_id"] for r in rows] == ["m1", "m1", "m2"]
+    assert [r["deleted"] for r in rows if r["message_id"] == "m1"] == [False, True]
+
+
+def test_refuses_a_next_pointer_on_another_host(base_config, dummy_response_cls, dummy_context):
+    """The session carries the bearer token on every request."""
+    stream = _stream(base_config)
+    _wire(
+        stream,
+        {
+            LABELS_URL: ONE_LABEL,
+            MESSAGES_URL: _label_page(["m1"], has_more=True, next_pointer="https://attacker.invalid/collect"),
+        },
+        dummy_response_cls,
+    )
+
+    with pytest.raises(TapStreamConnectionFailure):
+        list(stream.request_records(dummy_context))
+
+
+def test_accepts_an_absolute_next_pointer_on_the_configured_host(base_config, dummy_response_cls, dummy_context):
     page_two = "https://whatsapp.turn.io/v1/labels/lbl-1/messages?p=1"
     stream = _stream(base_config)
     _wire(
@@ -160,14 +203,50 @@ def test_drops_duplicate_links_within_a_label(base_config, dummy_response_cls, d
         {
             LABELS_URL: ONE_LABEL,
             MESSAGES_URL: _label_page(["m1"], has_more=True, next_pointer=page_two),
-            page_two: _label_page(["m1", "m2"]),
+            page_two: _label_page(["m2"]),
         },
         dummy_response_cls,
     )
 
-    rows = list(stream.request_records(dummy_context))
+    assert [r["message_id"] for r in list(stream.request_records(dummy_context))] == ["m1", "m2"]
 
-    assert [r["message_id"] for r in rows] == ["m1", "m2"]
+
+def test_more_pages_with_no_pointer_fails_the_run(base_config, dummy_response_cls, dummy_context):
+    stream = _stream(base_config)
+    _wire(
+        stream,
+        {
+            LABELS_URL: ONE_LABEL,
+            MESSAGES_URL: _label_page(["m1"], has_more=True, next_pointer=None),
+        },
+        dummy_response_cls,
+    )
+
+    with pytest.raises(TapStreamConnectionFailure):
+        list(stream.request_records(dummy_context))
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [(True, True), (False, False), ("true", True), ("false", False), ("FALSE", False), (None, False)],
+)
+def test_reads_the_deleted_flag_without_coercing(base_config, dummy_response_cls, dummy_context, raw, expected):
+    """bool("false") is True, which would unlabel the message."""
+    page = _label_page(["m1"])
+    page["message_labels"][0]["deleted"] = raw
+    stream = _stream(base_config)
+    _wire(stream, {LABELS_URL: ONE_LABEL, MESSAGES_URL: page}, dummy_response_cls)
+
+    assert list(stream.request_records(dummy_context))[0]["deleted"] is expected
+
+
+def test_an_unrecognised_deleted_value_keeps_the_label(base_config, dummy_response_cls, dummy_context):
+    page = _label_page(["m1"])
+    page["message_labels"][0]["deleted"] = {"unexpected": "shape"}
+    stream = _stream(base_config)
+    _wire(stream, {LABELS_URL: ONE_LABEL, MESSAGES_URL: page}, dummy_response_cls)
+
+    assert list(stream.request_records(dummy_context))[0]["deleted"] is False
 
 
 def test_a_page_loop_fails_the_run(base_config, dummy_response_cls, dummy_context):
