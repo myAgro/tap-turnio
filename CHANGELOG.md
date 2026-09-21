@@ -34,6 +34,9 @@ by `inserted_at` and never re-emits a logged message.
 - `message_labels` stream, FULL_TABLE, one row per (message, label) pair,
   including links Turn.io has marked `deleted`.
 - `labels_max_pages_per_label` setting to cap pages fetched per label.
+- `labels_page_size` setting, default 500. Turn serves 50 per page unless
+  asked and drops the parameter from its own `next` pointer, so the tap
+  re-applies it to every page.
 
 #### 🛡️ Reliability
 - Any failed or malformed label request fails the run rather than publishing a

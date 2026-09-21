@@ -101,6 +101,11 @@ class TapTurnio(Tap):
             # --- Message labels ----------------------------------------------------
             # The label endpoints have no date filter, so a sweep costs one
             # request per 50 links per label. This caps a runaway label.
+            "labels_page_size": {
+                "type": "integer",
+                "default": 500,
+                "description": "Links requested per label page (Turn defaults to 50)",
+            },
             "labels_max_pages_per_label": {
                 "type": "integer",
                 "default": 0,

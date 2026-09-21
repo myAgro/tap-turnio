@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from json import JSONDecodeError
 from typing import Any
-from urllib.parse import quote_plus, urlparse, urlunparse
+from urllib.parse import parse_qsl, quote_plus, urlencode, urlparse, urlunparse
 
 import pendulum
 import requests
@@ -1098,6 +1098,23 @@ class MessageLabelsStream(TurnStream):
             return None
         return payload
 
+    @property
+    def page_size(self) -> int:
+        """Return links requested per page, clamped to something sane."""
+        configured = int(self.config.get("labels_page_size", 500) or 500)
+        return max(1, min(configured, 2000))
+
+    def _with_page_size(self, url: str) -> str:
+        """Force our page size onto a URL, replacing any the caller carried.
+
+        Turn drops page_size from the `next` pointer it hands back, so without
+        this every page after the first silently reverts to the default 50.
+        """
+        parsed = urlparse(url)
+        query = [(k, v) for k, v in parse_qsl(parsed.query) if k != "page_size"]
+        query.append(("page_size", str(self.page_size)))
+        return urlunparse(parsed._replace(query=urlencode(query)))
+
     def _absolute(self, pointer: str) -> str:
         """Resolve a 'next' pointer against the configured base URL.
 
@@ -1145,7 +1162,7 @@ class MessageLabelsStream(TurnStream):
         label_uuid = str(label["uuid"])
         max_pages = int(self.config.get("labels_max_pages_per_label", 0) or 0)
 
-        url: str | None = f"{self.url_base}/v1/labels/{quote_plus(label_uuid)}/messages"
+        url: str | None = self._with_page_size(f"{self.url_base}/v1/labels/{quote_plus(label_uuid)}/messages")
         visited: set[str] = set()
         page_num = 0
 
@@ -1198,7 +1215,7 @@ class MessageLabelsStream(TurnStream):
                 raise TapStreamConnectionFailure(
                     f"Label {label_uuid} reports more pages but gave no next pointer"
                 )
-            url = self._absolute(next_pointer.strip())
+            url = self._with_page_size(self._absolute(next_pointer.strip()))
 
     # =============================================================================
     # Record construction

@@ -1,4 +1,5 @@
 from datetime import timedelta
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import pytest
 from dateutil.parser import isoparse
@@ -13,16 +14,25 @@ def _stream(base_config, overrides=None):
     return MessageLabelsStream(tap)
 
 
+def _strip_page_size(url):
+    """Routes are declared without page_size; the stream always sends one."""
+    parsed = urlparse(url)
+    query = [(k, v) for k, v in parse_qsl(parsed.query) if k != "page_size"]
+    return urlunparse(parsed._replace(query=urlencode(query)))
+
+
 def _wire(stream, routes, dummy_response_cls, calls=None):
     """Answer each GET from `routes`, keyed by the requested URL."""
+    routes = {_strip_page_size(k): v for k, v in routes.items()}
 
     def fake_request(prepared_request, context):
         url = prepared_request.url
         if calls is not None:
             calls.append(url)
-        if url not in routes:
+        key = _strip_page_size(url)
+        if key not in routes:
             raise AssertionError(f"unexpected URL: {url}")
-        body = routes[url]
+        body = routes[key]
         if isinstance(body, tuple):
             status_code, body = body
         else:
@@ -265,7 +275,7 @@ def test_a_page_loop_fails_the_run(base_config, dummy_response_cls, dummy_contex
 
     with pytest.raises(TapStreamConnectionFailure):
         list(stream.request_records(dummy_context))
-    assert calls.count(MESSAGES_URL) == 1
+    assert [_strip_page_size(c) for c in calls].count(MESSAGES_URL) == 1
 
 
 def test_honours_labels_max_pages_per_label(base_config, dummy_response_cls, dummy_context):
@@ -399,7 +409,7 @@ def test_label_uuid_is_url_encoded(base_config, dummy_response_cls, dummy_contex
 
     list(stream.request_records(dummy_context))
 
-    assert "https://whatsapp.turn.io/v1/labels/a+b%2Fc/messages" in calls
+    assert "https://whatsapp.turn.io/v1/labels/a+b%2Fc/messages" in [_strip_page_size(c) for c in calls]
 
 
 def test_never_emits_activate_version_messages(base_config):
@@ -430,3 +440,29 @@ def test_epoch_like_dates_are_rejected_rather_than_read_as_seconds():
 def test_the_sweep_reuses_one_session(base_config):
     stream = _stream(base_config)
     assert stream.http_client is stream.http_client
+
+
+def test_page_size_is_applied_to_every_page(base_config, dummy_response_cls, dummy_context):
+    """Turn drops page_size from the next pointer, so it must be re-applied."""
+    calls = []
+    stream = _stream(base_config, {"labels_page_size": 500})
+    second = "https://whatsapp.turn.io/v1/labels/lbl-1/messages?page=1"
+    _wire(
+        stream,
+        {
+            LABELS_URL: ONE_LABEL,
+            MESSAGES_URL: _label_page(["m1"], has_more=True, next_pointer="/v1/labels/lbl-1/messages?page=1"),
+            second: _label_page(["m2"]),
+        },
+        dummy_response_cls,
+        calls=calls,
+    )
+
+    assert [r["message_id"] for r in list(stream.request_records(dummy_context))] == ["m1", "m2"]
+    assert all("page_size=500" in c for c in calls if "/messages" in c)
+
+
+def test_page_size_is_clamped(base_config):
+    assert _stream(base_config, {"labels_page_size": 99999}).page_size == 2000
+    assert _stream(base_config, {"labels_page_size": 0}).page_size == 500
+    assert _stream(base_config).page_size == 500

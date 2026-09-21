@@ -51,6 +51,7 @@ The tap reads credentials and parameters from environment variables prefixed wit
 | `lookback_sec`         | integer           | ❌        | 0                          | Overlap (in seconds) from previous bookmark |
 | `messages_cursor_json` | object            | ❌        | `{}`                       | Optional POST cursor params for messages    |
 | `statuses_cursor_json` | object            | ❌        | `{}`                       | Optional POST cursor params for statuses    |
+| `labels_page_size`     | integer           | ❌        | 500                        | Links per label page (Turn defaults to 50)  |
 | `labels_max_pages_per_label` | integer     | ❌        | 0                          | Cap on pages per label (0 = unlimited)      |
 
 ### Example basic auth configuration file (`config.json`)
@@ -159,7 +160,9 @@ the whole sweep. This is the highest-volume stream in the tap, and the base
 class both rebuilds its session per request and bypasses the SDK hook that
 applies the limiter, so this stream wires both up itself.
 
-Cost is one request per 50 links per label. Set `labels_max_pages_per_label` to
+Cost is one request per `labels_page_size` links per label. Turn serves 50 by
+default and drops the parameter from the `next` pointer it returns, so the
+tap re-applies it to every page. Set `labels_max_pages_per_label` to
 cap a runaway label; the tap logs the link count per label on every run. Note
 that capping truncates a label, and the loader treats the links you stop
 fetching as removed, so use it to survive an incident rather than as a steady
