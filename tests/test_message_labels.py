@@ -321,3 +321,20 @@ def test_label_uuid_is_url_encoded(base_config, dummy_response_cls, dummy_contex
     list(stream.request_records(dummy_context))
 
     assert "https://whatsapp.turn.io/v1/labels/a+b%2Fc/messages" in calls
+
+
+def test_never_emits_activate_version_messages(base_config):
+    """The loader acts on those before the first record, so a failed sweep
+    would blank every label."""
+    stream = _stream(base_config)
+    assert stream.emit_activate_version_messages is False
+
+    # The SDK reads this from config, so prove config cannot turn it back on.
+    forced = dict(stream.config)
+    forced["emit_activate_version_messages"] = True
+    # Shadow the config property so the SDK would see the flag turned on.
+    type(stream).config = property(lambda self: forced)
+    try:
+        assert stream.emit_activate_version_messages is False
+    finally:
+        del type(stream).config

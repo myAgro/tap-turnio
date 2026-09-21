@@ -38,6 +38,8 @@ by `inserted_at` and never re-emits a logged message.
 #### 🛡️ Reliability
 - Any failed or malformed label request fails the run rather than publishing a
   partial sweep, which the loader would otherwise apply as an unlabelling.
+- Activate-version messages stay off for `message_labels`, so the table is
+  upsert-only and a failed sweep cannot blank every label.
 
 ---
 

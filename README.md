@@ -143,6 +143,12 @@ so a label applied after the message arrived can only be read from the label
 endpoints. Those endpoints offer no date filter, and bookmarking on the message
 timestamp would drop exactly the late labels this stream exists to capture.
 
+The stream never emits activate-version messages. The Singer SDK sends those
+before the first record, and a loader acts on one by marking every existing row
+deleted, so a sweep that failed halfway would leave every message unlabelled.
+The table is therefore upsert-only, and unlinking travels on the `deleted` flag
+carried by each record.
+
 Any transport or shape error raises and fails the run. On a full table stream a
 short read is indistinguishable from "this label lost its messages", and the
 loader would carry that through as an unlabelling, so a partial sweep must

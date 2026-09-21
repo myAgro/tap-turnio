@@ -1012,6 +1012,19 @@ class MessageLabelsStream(TurnStream):
     # bookmark and would be skipped forever.
     replication_key = None
     replication_method = "FULL_TABLE"
+
+    @property
+    def emit_activate_version_messages(self) -> bool:
+        """Never emit activate-version messages for this stream.
+
+        The SDK sends the version message before the first record, and the
+        loader acts on it immediately by stamping every existing row deleted.
+        A sweep that then fails would leave every message unlabelled until the
+        next good run. Staying off makes the table upsert-only: unlinking
+        travels on Turn's own `deleted` flag instead, which is carried on each
+        record.
+        """
+        return False
     schema = th.PropertiesList(
         th.Property("message_id", th.StringType),
         th.Property("label_uuid", th.StringType),
