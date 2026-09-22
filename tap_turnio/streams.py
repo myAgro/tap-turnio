@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from json import JSONDecodeError
 from typing import Any
-from urllib.parse import quote_plus
+from urllib.parse import parse_qsl, quote_plus, urlencode, urlparse, urlunparse
 
 import pendulum
 import requests
@@ -26,6 +26,32 @@ from singer_sdk.streams.rest import RESTStream
 
 from tap_turnio.auth import TurnAuthenticator
 from tap_turnio.client import turn_rate_limited_request
+
+
+# =============================================================================
+# Module helpers
+# =============================================================================
+def coerce_timestamp(value: Any) -> str | None:
+    """Return a UTC ISO-8601 string for a Turn timestamp, or None if unusable.
+
+    Turn sends either an ISO-8601 string or a Unix epoch, and the epoch arrives
+    as a bare integer on some endpoints and a digit string on others.
+    """
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    try:
+        # Only digit strings of epoch length are epochs. "20260921" is a date
+        # someone wrote without separators, and reading it as seconds would
+        # silently place the message in 1970.
+        if isinstance(value, str) and value.isdigit():
+            if not 9 <= len(value) <= 13:
+                return None
+            value = int(value)
+        if isinstance(value, int | float):
+            return datetime.fromtimestamp(value, tz=UTC).isoformat()
+        return isoparse(value).astimezone(UTC).isoformat()
+    except Exception:
+        return None
 
 
 # =============================================================================
@@ -951,3 +977,328 @@ class StatusesStream(TurnStream):
             "recipient_id": recipient_id,
             "payload_json": status,
         }
+
+
+# =============================================================================
+# Message Labels Stream
+#
+# Why this stream exists:
+#   Turn paginates the message export by `inserted_at` and never re-emits a
+#   message once it is logged, so a label applied minutes or days after the
+#   message arrived can never reach us through `messages`. The label endpoints
+#   are the only read path that reflects the current state, so labels are
+#   pulled from there and joined back on message_id downstream.
+#
+# Shape:
+#   One row per (message, label) pair, including pairs Turn has marked
+#   `deleted`, so that an unlabelled message can be reconciled downstream
+#   rather than silently keeping a stale label.
+#
+# Focused overrides:
+#   - request_records: walks /v1/labels, then /v1/labels/<uuid>/messages
+#   - no cursor endpoint, so the base window/bookmark machinery is unused
+#
+# Partial sweeps are treated as failures. A short read is indistinguishable
+# from "this label lost its messages", so every transport or shape error
+# raises rather than letting the run report a truncated label set as complete.
+# Records already streamed before the failure are still committed by the
+# loader; because this stream only ever upserts, that leaves some rows
+# refreshed and the rest untouched, never removed.
+# =============================================================================
+class MessageLabelsStream(TurnStream):
+    """Stream of message-to-label links read from the Turn label endpoints."""
+
+    name = "message_labels"
+    kind = "message_labels"
+    path = "/v1/labels"
+    primary_keys = ["message_id", "label_uuid"]
+    # Full table on purpose. The only usable ordering here is the message
+    # timestamp, and bookmarking on it would re-create the very bug this
+    # stream fixes: a label applied today to an old message sorts below the
+    # bookmark and would be skipped forever.
+    replication_key = None
+    replication_method = "FULL_TABLE"
+
+    @property
+    def emit_activate_version_messages(self) -> bool:
+        """Never emit activate-version messages for this stream.
+
+        The SDK sends the version message before the first record, and the
+        loader acts on it immediately by stamping every existing row deleted.
+        A sweep that then fails would leave every message unlabelled until the
+        next good run. Staying off makes the table upsert-only: unlinking
+        travels on Turn's own `deleted` flag instead, which is carried on each
+        record.
+        """
+        return False
+    schema = th.PropertiesList(
+        th.Property("message_id", th.StringType),
+        th.Property("label_uuid", th.StringType),
+        th.Property("label_value", th.StringType),
+        th.Property("label_color", th.StringType),
+        th.Property("confidence", th.NumberType),
+        th.Property("deleted", th.BooleanType),
+        th.Property("message_timestamp", th.DateTimeType),
+        th.Property("metadata", th.ObjectType(additional_properties=True)),
+    ).to_dict()
+
+    # =============================================================================
+    # HTTP transport
+    #
+    # The base class builds a new session on every access and overrides the
+    # SDK hook that would otherwise apply the rate limiter, so requests made
+    # here would go out unthrottled and without retry. This stream issues far
+    # more requests than any other, so it keeps one session and sends through
+    # the limiter explicitly.
+    # =============================================================================
+    _session: requests.Session | None = None
+    _limited_send = None
+
+    @property
+    def http_client(self) -> requests.Session:
+        """Return one session reused for the whole sweep."""
+        if self._session is None:
+            self._session = super().http_client
+        return self._session
+
+    def _request(self, prepared_request, context):
+        """Send through the header-aware limiter, with its 429 backoff."""
+        if self._limited_send is None:
+            self._limited_send = self.request_decorator(
+                lambda request, **kwargs: self.http_client.send(request, **kwargs)
+            )
+        return self._limited_send(prepared_request)
+
+    # =============================================================================
+    # HTTP helper
+    # =============================================================================
+    def _get_json(self, url: str, context: dict, label: str) -> dict | None:
+        """GET a URL and return the decoded body, or None when unusable."""
+        request = Request(method="GET", url=url, headers=self.http_headers)
+        prepared_request = self.http_client.prepare_request(request)
+        self._log_prepared_request(prepared_request, label)
+        response = self._request(prepared_request, context)
+        self._log_http_response(response, note=label)
+
+        status_code = getattr(response, "status_code", 0)
+        if status_code == 403:
+            self._error("Access forbidden (403) on %s for %s. Check credentials and permissions.", url, self.kind)
+            raise TapStreamConnectionFailure("403 Forbidden")
+        if status_code >= 400:
+            self._error("HTTP %s on %s for %s", status_code, url, self.kind)
+            return None
+
+        try:
+            payload = response.json()
+        except JSONDecodeError as e:
+            self._error("Invalid JSON on %s for %s: %s", url, self.kind, e)
+            return None
+        if not isinstance(payload, dict):
+            self._error("Expected an object on %s for %s, got %s", url, self.kind, type(payload).__name__)
+            return None
+        return payload
+
+    @property
+    def page_size(self) -> int:
+        """Return links requested per page, clamped to something sane."""
+        configured = int(self.config.get("labels_page_size", 500) or 500)
+        return max(1, min(configured, 2000))
+
+    def _with_page_size(self, url: str) -> str:
+        """Force our page size onto a URL, replacing any the caller carried.
+
+        Turn drops page_size from the `next` pointer it hands back, so without
+        this every page after the first silently reverts to the default 50.
+        """
+        parsed = urlparse(url)
+        query = [(k, v) for k, v in parse_qsl(parsed.query) if k != "page_size"]
+        query.append(("page_size", str(self.page_size)))
+        return urlunparse(parsed._replace(query=urlencode(query)))
+
+    def _absolute(self, pointer: str) -> str:
+        """Resolve a 'next' pointer against the configured base URL.
+
+        Only the path and query are taken, never the host. The session carries
+        the Turn bearer token on every request, so following a host named in a
+        response body would hand that token to whoever named it.
+        """
+        parsed = urlparse(pointer)
+        if parsed.scheme or parsed.netloc:
+            base = urlparse(self.url_base)
+            if (parsed.scheme, parsed.netloc) != (base.scheme, base.netloc):
+                raise TapStreamConnectionFailure(
+                    f"Refusing to follow a next pointer off {base.netloc}: {parsed.scheme}://{parsed.netloc}"
+                )
+        path = parsed.path if parsed.path.startswith("/") else f"/{parsed.path}"
+        return urlunparse(("", "", f"{self.url_base}{path}", "", parsed.query, ""))
+
+    # =============================================================================
+    # Label listing
+    # =============================================================================
+    def _iter_labels(self, context: dict) -> Iterable[dict]:
+        """Yield every label currently linked to the number."""
+        payload = self._get_json(f"{self.url_base}/v1/labels", context, "labels list")
+        if payload is None:
+            raise TapStreamConnectionFailure("Could not list labels")
+
+        labels = payload.get("labels")
+        if not isinstance(labels, list):
+            raise TapStreamConnectionFailure(f"Expected 'labels' to be a list, got {type(labels).__name__}")
+
+        for label in labels:
+            if not isinstance(label, dict):
+                self._warning("Skipping non-dict label in %s: %s", self.kind, type(label).__name__)
+                continue
+            if not label.get("uuid"):
+                self._warning("Skipping label without uuid in %s: %s", self.kind, self._pretty(label))
+                continue
+            yield label
+
+    # =============================================================================
+    # Labelled messages per label
+    # =============================================================================
+    def _iter_label_messages(self, label: dict, context: dict) -> Iterable[dict]:
+        """Yield every message linked to one label, following 'next'."""
+        label_uuid = str(label["uuid"])
+        max_pages = int(self.config.get("labels_max_pages_per_label", 0) or 0)
+
+        url: str | None = self._with_page_size(f"{self.url_base}/v1/labels/{quote_plus(label_uuid)}/messages")
+        visited: set[str] = set()
+        page_num = 0
+
+        while url:
+            if url in visited:
+                # Paging in a circle means the rest of this label is
+                # unreachable, so the sweep is short. Fail rather than report
+                # a truncated label set as if it were complete.
+                raise TapStreamConnectionFailure(
+                    f"Label {label_uuid} paged back to a page already served; cannot complete the sweep"
+                )
+            visited.add(url)
+
+            payload = self._get_json(url, context, f"label {label_uuid} page{page_num + 1}")
+            if payload is None:
+                raise TapStreamConnectionFailure(f"Could not read page {page_num + 1} of label {label_uuid}")
+
+            items = payload.get("message_labels")
+            if not isinstance(items, list):
+                raise TapStreamConnectionFailure(
+                    f"Expected 'message_labels' to be a list for label {label_uuid}, got {type(items).__name__}"
+                )
+
+            emitted = 0
+            for item in items:
+                record = self._build_record(item, label)
+                if record is None:
+                    continue
+                # Repeats are passed through rather than filtered. Turn can
+                # serve the same link twice while labels are being applied,
+                # and the loader keys on (message_id, label_uuid) with the
+                # last write winning, so the newest state is the one that
+                # lands. Dropping the repeat would instead pin the oldest.
+                emitted += 1
+                yield record
+
+            page_num += 1
+            self._info("Fetched label %s page %d with %d links for %s", label_uuid, page_num, emitted, self.kind)
+
+            if max_pages > 0 and page_num >= max_pages:
+                self._warning("Reached labels_max_pages_per_label (%s) for label %s", max_pages, label_uuid)
+                break
+
+            next_pointer = payload.get("next")
+            if not payload.get("has_more"):
+                break
+            if not isinstance(next_pointer, str) or not next_pointer.strip():
+                # Turn says there is more but gave us no way to reach it, so
+                # the rest of this label is lost. Fail rather than call it done.
+                raise TapStreamConnectionFailure(
+                    f"Label {label_uuid} reports more pages but gave no next pointer"
+                )
+            url = self._with_page_size(self._absolute(next_pointer.strip()))
+
+    # =============================================================================
+    # Record construction
+    # =============================================================================
+    def _build_record(self, item: Any, label: dict) -> dict | None:
+        """Turn one message_labels entry into a schema-safe row."""
+        if isinstance(item, str):
+            try:
+                item = json.loads(item)
+            except JSONDecodeError:
+                self._error("Failed to parse string entry as JSON in %s: %s", self.kind, item)
+                return None
+        if not isinstance(item, dict):
+            self._error("Invalid entry in %s: expected dict, got %s", self.kind, type(item).__name__)
+            return None
+
+        message = item.get("message")
+        if not isinstance(message, dict):
+            self._error("Entry without a message object in %s: %s", self.kind, self._pretty(item))
+            return None
+
+        message_id = message.get("id")
+        if not message_id:
+            self._error("Entry without a message id in %s: %s", self.kind, self._pretty(message))
+            return None
+
+        confidence = item.get("confidence")
+        if confidence is not None:
+            try:
+                confidence = float(confidence)
+            except (TypeError, ValueError):
+                self._warning("Invalid confidence %r in %s; storing null", confidence, self.kind)
+                confidence = None
+
+        metadata = item.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        return {
+            "message_id": str(message_id),
+            "label_uuid": str(label["uuid"]),
+            "label_value": label.get("value"),
+            "label_color": label.get("color"),
+            "confidence": confidence,
+            "deleted": self._is_deleted(item),
+            # Best effort. A link is still valid when the timestamp is not.
+            "message_timestamp": coerce_timestamp(message.get("timestamp")),
+            "metadata": metadata,
+        }
+
+    def _is_deleted(self, item: dict) -> bool:
+        """Read the deleted flag without guessing.
+
+        `bool("false")` is True, so coercing the raw value would unlabel a
+        message on a response Turn never meant that way. Anything unrecognised
+        counts as not deleted, which keeps the label rather than dropping it.
+        """
+        raw = item.get("deleted", False)
+        if isinstance(raw, bool):
+            return raw
+        if raw is None:
+            return False
+        if isinstance(raw, str) and raw.strip().lower() in {"true", "false"}:
+            return raw.strip().lower() == "true"
+        self._error("Unrecognised deleted value %r in %s; treating the link as live", raw, self.kind)
+        return False
+
+    # =============================================================================
+    # Public record request entrypoint
+    # =============================================================================
+    def request_records(self, context: dict | None) -> Iterable[dict]:
+        """Yield one record per message-label link across every label."""
+        context = context or {}
+        total = 0
+        label_count = 0
+
+        for label in self._iter_labels(context):
+            label_count += 1
+            per_label = 0
+            for record in self._iter_label_messages(label, context):
+                per_label += 1
+                total += 1
+                yield record
+            self._info("Label %r yielded %d links for %s", label.get("value"), per_label, self.kind)
+
+        self._info("Fetched %d links across %d labels for %s", total, label_count, self.kind)

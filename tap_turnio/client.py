@@ -190,6 +190,17 @@ def turn_rate_limited_request(
             backoff = 1.0
             max_retries = 6
 
+            def _wait_for_bucket(resp: Response) -> None:
+                """Wait on the bucket the response named, not on 'general'.
+
+                Turn reports which bucket ran out in X-Ratelimit-Bucket, and
+                update_from_response records the wait against that bucket.
+                Acquiring 'general' would return immediately, turning the
+                retry budget into a burst of instant requests.
+                """
+                bucket = (resp.headers.get("X-Ratelimit-Bucket") or "general").strip().lower()
+                _header_limiter.acquire(number_hint, bucket)
+
             for attempt in range(max_retries):
                 resp: Response | None = None
                 try:
@@ -197,7 +208,8 @@ def turn_rate_limited_request(
                     _header_limiter.update_from_response(number_hint, resp)
 
                     if resp.status_code == 429:
-                        _header_limiter.acquire(number_hint, "general")
+                        warn("Rate limited by Turn; waiting before retry %d/%d", attempt + 1, max_retries)
+                        _wait_for_bucket(resp)
                         continue
 
                     resp.raise_for_status()
@@ -205,7 +217,7 @@ def turn_rate_limited_request(
 
                 except requests.HTTPError as e:
                     if resp is not None and resp.status_code == 429:
-                        _header_limiter.acquire(number_hint, "general")
+                        _wait_for_bucket(resp)
                         continue
                     if attempt == max_retries - 1:
                         err("HTTP error after retries: %s", e, exc_info=True)
@@ -221,7 +233,7 @@ def turn_rate_limited_request(
                     time.sleep(min(backoff, 10.0))
                     backoff *= 2
 
-            raise RuntimeError("Turn request retries exhausted")
+            raise RuntimeError(f"Turn request retries exhausted after {max_retries} attempts")
 
         return inner
 

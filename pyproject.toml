@@ -3,7 +3,7 @@
 # =============================================================================
 [tool.poetry]
 name = "tap-turnio"
-version = "0.1.0"
+version = "0.2.0"
 description = "Singer tap for Turn.io WhatsApp API"
 authors = ["MyAgro Data Engineering Team <data@myagro.org>"]
 packages = [{ include = "tap_turnio" }]

@@ -9,7 +9,7 @@ It provides structured, incremental replication of message and status records fo
 ## 🧩 Capabilities
 
 * ✅ **Incremental replication** using timestamp bookmarks
-* ✅ **Two streams**: `messages` and `statuses`
+* ✅ **Three streams**: `messages`, `statuses` and `message_labels`
 * ✅ **Configurable pagination and overlap (`lookback_sec`)**
 * ✅ **HTTP Basic authentication**
 * ✅ **HTTP Token authentication** (via API token)
@@ -51,6 +51,8 @@ The tap reads credentials and parameters from environment variables prefixed wit
 | `lookback_sec`         | integer           | ❌        | 0                          | Overlap (in seconds) from previous bookmark |
 | `messages_cursor_json` | object            | ❌        | `{}`                       | Optional POST cursor params for messages    |
 | `statuses_cursor_json` | object            | ❌        | `{}`                       | Optional POST cursor params for statuses    |
+| `labels_page_size`     | integer           | ❌        | 500                        | Links per label page (Turn defaults to 50)  |
+| `labels_max_pages_per_label` | integer     | ❌        | 0                          | Cap on pages per label (0 = unlimited)      |
 
 ### Example basic auth configuration file (`config.json`)
 
@@ -120,6 +122,51 @@ Extracts message status updates (delivered, read, failed, etc.).
 | `timestamp`    | datetime | Timestamp of status    |
 | `recipient_id` | string   | Recipient phone number |
 | `payload_json` | object   | Full raw status JSON   |
+
+### `message_labels`
+
+Extracts the links between messages and the labels applied to them, one row per pair.
+
+| Property            | Type     | Description                                |
+| ------------------- | -------- | ------------------------------------------ |
+| `message_id`        | string   | Message the label is applied to             |
+| `label_uuid`        | string   | Label ID                                    |
+| `label_value`       | string   | Label name as shown in the Turn.io UI       |
+| `label_color`       | string   | Label colour                                |
+| `confidence`        | number   | Confidence score, when the label carries one|
+| `deleted`           | boolean  | Whether Turn.io has unlinked the label      |
+| `message_timestamp` | datetime | Timestamp of the labelled message           |
+| `metadata`          | object   | Free-form metadata attached to the link     |
+
+This stream replicates FULL_TABLE, and deliberately so. Turn.io paginates the
+message export by `inserted_at` and never re-emits a message once it is logged,
+so a label applied after the message arrived can only be read from the label
+endpoints. Those endpoints offer no date filter, and bookmarking on the message
+timestamp would drop exactly the late labels this stream exists to capture.
+
+The stream never emits activate-version messages. The Singer SDK sends those
+before the first record, and a loader acts on one by marking every existing row
+deleted, so a sweep that failed halfway would leave every message unlabelled.
+The table is therefore upsert-only, and unlinking travels on the `deleted` flag
+carried by each record.
+
+Any transport or shape error raises and fails the run. On a full table stream a
+short read is indistinguishable from "this label lost its messages", and the
+loader would carry that through as an unlabelling, so a partial sweep must
+never be published.
+
+Requests go through the header-aware limiter and reuse a single session for
+the whole sweep. This is the highest-volume stream in the tap, and the base
+class both rebuilds its session per request and bypasses the SDK hook that
+applies the limiter, so this stream wires both up itself.
+
+Cost is one request per `labels_page_size` links per label. Turn serves 50 by
+default and drops the parameter from the `next` pointer it returns, so the
+tap re-applies it to every page. Set `labels_max_pages_per_label` to
+cap a runaway label; the tap logs the link count per label on every run. Note
+that capping truncates a label, and the loader treats the links you stop
+fetching as removed, so use it to survive an incident rather than as a steady
+state.
 
 ---
 

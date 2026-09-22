@@ -23,6 +23,46 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Removed
 - 
 
+## [0.2.0] - 2026-09-21
+### ✨ Minor Release — *Message labels*
+Adds a `message_labels` stream reading `/v1/labels` and
+`/v1/labels/<uuid>/messages`, so labels applied after a message is logged reach
+the warehouse. The message export cannot carry them: Turn.io paginates messages
+by `inserted_at` and never re-emits a logged message.
+
+#### ✨ Added
+- `message_labels` stream, FULL_TABLE, one row per (message, label) pair,
+  including links Turn.io has marked `deleted`.
+- `labels_max_pages_per_label` setting to cap pages fetched per label.
+- `labels_page_size` setting, default 500. Turn serves 50 per page unless
+  asked and drops the parameter from its own `next` pointer, so the tap
+  re-applies it to every page.
+
+#### 🛡️ Reliability
+- Any failed or malformed label request fails the run rather than publishing a
+  partial sweep, which the loader would otherwise apply as an unlabelling.
+- Activate-version messages stay off for `message_labels`, so the table is
+  upsert-only and a failed sweep cannot blank every label.
+- Label requests go through the header-aware rate limiter and reuse one
+  session, so a 429 is retried instead of killing the run.
+- A label that pages back to a page already served fails the run rather than
+  reporting a truncated label set as complete.
+- `coerce_timestamp` rejects booleans and digit strings that are not epoch
+  length, so a date written as `20260921` is no longer read as 1970.
+- A `next` pointer is resolved against the configured base URL and refused if
+  it names another host, so a response body cannot redirect the bearer token.
+- `has_more` with no usable `next` fails the run instead of reporting a
+  truncated label set as complete.
+- The `deleted` flag is read rather than coerced; `bool("false")` is True and
+  would have unlabelled the message.
+- Repeated links are passed through rather than filtered, so the later state
+  wins at the loader instead of the first one seen. This also removes the
+  per-label set of message ids, which grew with every historical link.
+- A 429 now waits on the bucket Turn named rather than on `general`, which
+  returned at once and burned the retry budget in milliseconds.
+
+---
+
 ## [0.1.2] - 2025-10-29
 ### ✨ Minor Release — *Token Auth Support*
 This minor release introduces support for token-based authentication, allowing users to authenticate using API tokens in addition to the existing basic authentication method.

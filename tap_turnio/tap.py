@@ -4,7 +4,7 @@
 #
 # Responsibilities:
 #   - Define the tap's configuration schema (validated by Singer SDK).
-#   - Instantiate and return the list of streams (Messages, Statuses).
+#   - Instantiate and return the list of streams (Messages, Statuses, MessageLabels).
 #   - Provide a CLI entrypoint.
 #
 # Env vars:
@@ -20,6 +20,7 @@
 #     TAP_TURNIO_LOOKBACK_SEC
 #     TAP_TURNIO_MESSAGES_CURSOR_JSON
 #     TAP_TURNIO_STATUSES_CURSOR_JSON
+#     TAP_TURNIO_LABELS_MAX_PAGES_PER_LABEL
 #
 # Notes:
 #   - This file keeps only tap-level concerns; stream logic lives in streams.py.
@@ -32,7 +33,7 @@ from singer_sdk import Tap
 from singer_sdk.exceptions import TapStreamConnectionFailure
 from singer_sdk.plugin_base import PluginBase  # noqa: F401  # (kept for IDE refs / parity)
 
-from tap_turnio.streams import MessagesStream, StatusesStream
+from tap_turnio.streams import MessageLabelsStream, MessagesStream, StatusesStream
 
 ############################################################
 # TapTurnio
@@ -96,6 +97,20 @@ class TapTurnio(Tap):
             # These allow passing extra POST params for cursor creation.
             "messages_cursor_json": {"type": "object", "default": {}},
             "statuses_cursor_json": {"type": "object", "default": {}},
+
+            # --- Message labels ----------------------------------------------------
+            # The label endpoints have no date filter, so a sweep costs one
+            # request per 50 links per label. This caps a runaway label.
+            "labels_page_size": {
+                "type": "integer",
+                "default": 500,
+                "description": "Links requested per label page (Turn defaults to 50)",
+            },
+            "labels_max_pages_per_label": {
+                "type": "integer",
+                "default": 0,
+                "description": "Hard cap on pages fetched per label (0 = no cap)",
+            },
         },
         "anyOf": [
             {"required": ["username","token"]},
@@ -107,7 +122,7 @@ class TapTurnio(Tap):
     # =============================================================================
     # Stream discovery
     # =============================================================================
-    def discover_streams(self) -> list[MessagesStream | StatusesStream]:
+    def discover_streams(self) -> list[MessagesStream | StatusesStream | MessageLabelsStream]:
         """Return all stream instances managed by this tap.
 
         Add/remove stream classes here to change which endpoints the tap exposes.
@@ -115,6 +130,7 @@ class TapTurnio(Tap):
         return [
             MessagesStream(self),
             StatusesStream(self),
+            MessageLabelsStream(self),
         ]
 
 
