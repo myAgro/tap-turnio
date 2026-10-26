@@ -14,7 +14,7 @@ python = "^3.10"
 singer-sdk = { version = "0.54.5", extras = ["testing"] }
 requests = "^2.31.0"
 python-dotenv = "^1.0.0"
-python-dateutil = "^2.8.2"
+python-dateutil = ">=2.8.2,<4.0.0"
 setuptools = "<84"
 pendulum = ">=3.1"
 
